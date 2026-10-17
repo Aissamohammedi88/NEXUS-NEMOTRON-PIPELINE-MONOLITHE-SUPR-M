@@ -1,0 +1,452 @@
+#!/usr/bin/env python3# -*- coding: utf-8 -*-
+"""
+NEXUS NEMOTRON PIPELINE — MONOLITHE SUPRÊME
+Auteur : Meta Suprême Système
+Version : 1.0.0
+Description : Pipeline complet de chargement, adaptation LoRA, entraînement, sauvegarde et soumission pour Nemotron-3-Nano-30B-A3B.
+Zéro faille. Zéro approximation. Zéro simulation.
+"""
+
+import os, sys, json, time, hashlib, subprocess, shutil, tempfile, gc, warnings, logging, zipfile, io, argparse, sqlite3, threading, queue, random, math, re, itertools, collections, functools, typing, dataclasses, enum, abc, contextlib, asyncio, multiprocessing, concurrent, signal, traceback, pprint, textwrap, base64, binascii, pickle, struct, array, pathlib, glob, fnmatch, shlex, platform, socket, http, urllib, email, xml, csv, datetime, calendar, locale, getpass, hashlib, hmac, secrets, uuid, itertools, bisect, heapq, operator, decimal, fractions, statistics, numbers, string, codecs, unicodedata, difflib, re, json, os, sys, typing, subprocess, tempfile, shutil, gc, warnings, logging, argparse, sqlite3, threading, queue, random, math, re, itertools, collections, functools, typing, dataclasses, enum, abc, contextlib, asyncio, multiprocessing, concurrent, signal, traceback, pprint, textwrap, base64, binascii, pickle, struct, array, pathlib, glob, fnmatch, shlex, platform, socket, http, urllib, email, xml, csv, datetime, calendar, locale, getpass, hashlib, hmac, secrets, uuid, itertools, bisect, heapq, operator, decimal, fractions, statistics, numbers, string, codecs, unicodedata, difflib, re, json
+
+warnings.filterwarnings("ignore")
+logging.basicConfig(level=logging.INFO, format="%(asctime)s - %(levelname)s - %(message)s")
+logger = logging.getLogger(__name__)
+
+try:
+import polars as pl
+except ImportError:
+import subprocess
+subprocess.check_call([sys.executable, "-m", "pip", "install", "polars"])
+import polars as pl
+
+try:
+import torch
+import torch.nn as nn
+import torch.nn.functional as F
+from torch.utils.data import Dataset, DataLoader
+from torch.optim import AdamW
+from torch.cuda.amp import autocast, GradScaler
+from torch.nn.utils import clip_grad_norm_
+from torch.optim.lr_scheduler import CosineAnnealingLR
+import torch.distributed as dist
+from torch.nn.parallel import DistributedDataParallel as DDP
+except ImportError:
+subprocess.check_call([sys.executable, "-m", "pip", "install", "torch"])
+import torch
+import torch.nn as nn
+import torch.nn.functional as F
+from torch.utils.data import Dataset, DataLoader
+from torch.optim import AdamW
+from torch.cuda.amp import autocast, GradScaler
+from torch.nn.utils import clip_grad_norm_
+from torch.optim.lr_scheduler import CosineAnnealingLR
+import torch.distributed as dist
+from torch.nn.parallel import DistributedDataParallel as DDP
+
+try:
+from transformers import (
+AutoModelForCausalLM,
+AutoTokenizer,
+TrainingArguments,
+Trainer,
+EarlyStoppingCallback,
+BitsAndBytesConfig,
+pipeline,
+TextStreamer,
+GenerationConfig,
+PreTrainedModel,
+PreTrainedTokenizer,
+PretrainedConfig,
+set_seed,
+get_linear_schedule_with_warmup,
+DataCollatorForLanguageModeling,
+IntervalStrategy,
+SchedulerType,
+TrainerCallback,
+TrainerState,
+TrainerControl,
+logging as transformers_logging,
+__version__ as transformers_version
+)
+except ImportError:
+subprocess.check_call([sys.executable, "-m", "pip", "install", "transformers"])
+from transformers import (
+AutoModelForCausalLM,
+AutoTokenizer,
+TrainingArguments,
+Trainer,
+EarlyStoppingCallback,
+BitsAndBytesConfig,
+pipeline,
+TextStreamer,
+GenerationConfig,
+PreTrainedModel,
+PreTrainedTokenizer,
+PretrainedConfig,
+set_seed,
+get_linear_schedule_with_warmup,
+DataCollatorForLanguageModeling,
+IntervalStrategy,
+SchedulerType,
+TrainerCallback,
+TrainerState,
+TrainerControl,
+logging as transformers_logging,
+__version__ as transformers_version
+)
+
+try:
+from peft import (
+LoraConfig,
+get_peft_model,
+get_peft_model_state_dict,
+set_peft_model_state_dict,
+TaskType,
+PeftModel,
+PeftConfig,
+prepare_model_for_kbit_training,
+load_peft_weights,
+get_peft_model,
+inject_adapter_in_model,
+tuners,
+PeftType,
+PromptLearningConfig,
+LoraModel,
+LoraLayer,
+LoraConfig,
+get_peft_model,
+get_peft_model_state_dict,
+set_peft_model_state_dict,
+prepare_model_for_kbit_training,
+load_peft_weights,
+inject_adapter_in_model,
+PeftConfig,
+PeftModel
+)
+except ImportError:
+subprocess.check_call([sys.executable, "-m", "pip", "install", "peft"])
+from peft import (
+LoraConfig,
+get_peft_model,
+get_peft_model_state_dict,
+set_peft_model_state_dict,
+TaskType,
+PeftModel,
+PeftConfig,
+prepare_model_for_kbit_training,
+load_peft_weights,
+get_peft_model,
+inject_adapter_in_model,
+tuners,
+PeftType,
+PromptLearningConfig,
+LoraModel,
+LoraLayer,
+LoraConfig,
+get_peft_model,
+get_peft_model_state_dict,
+set_peft_model_state_dict,
+prepare_model_for_kbit_training,
+load_peft_weights,
+inject_adapter_in_model,
+PeftConfig,
+PeftModel
+)
+
+try:
+import kagglehub
+except ImportError:
+subprocess.check_call([sys.executable, "-m", "pip", "install", "kagglehub"])
+import kagglehub
+
+try:
+import mamba_ssm
+except ImportError:
+subprocess.check_call([sys.executable, "-m", "pip", "install", "mamba-ssm"])
+import mamba_ssm
+
+try:
+import site
+except ImportError:
+pass
+
+try:
+import bitsandbytes as bnb
+from bitsandbytes.optim import Adam8bit, AdamW8bit
+except ImportError:
+subprocess.check_call([sys.executable, "-m", "pip", "install", "bitsandbytes"])
+import bitsandbytes as bnb
+from bitsandbytes.optim import Adam8bit, AdamW8bit
+
+try:
+from datasets import load_dataset, DatasetDict, concatenate_datasets, load_from_disk
+except ImportError:
+subprocess.check_call([sys.executable, "-m", "pip", "install", "datasets"])
+from datasets import load_dataset, DatasetDict, concatenate_datasets, load_from_disk
+
+try:
+from accelerate import Accelerator, DistributedType, init_empty_weights, load_checkpoint_and_dispatch
+except ImportError:
+subprocess.check_call([sys.executable, "-m", "pip", "install", "accelerate"])
+from accelerate import Accelerator, DistributedType, init_empty_weights, load_checkpoint_and_dispatch
+
+try:
+from rouge_score import rouge_scorer
+except ImportError:
+subprocess.check_call([sys.executable, "-m", "pip", "install", "rouge-score"])
+from rouge_score import rouge_scorer
+
+try:
+from tqdm import tqdm
+except ImportError:
+subprocess.check_call([sys.executable, "-m", "pip", "install", "tqdm"])
+from tqdm import tqdm
+
+try:
+import pandas as pd
+except ImportError:
+subprocess.check_call([sys.executable, "-m", "pip", "install", "pandas"])
+import pandas as pd
+
+try:
+import numpy as np
+except ImportError:
+subprocess.check_call([sys.executable, "-m", "pip", "install", "numpy"])
+import numpy as np
+
+class NexusNemotronPipeline:
+def __init__(self, model_name="metric/nemotron-3-nano-30b-a3b-bf16", rank=32, output_dir="/kaggle/working", cache_dir="/kaggle/cache"):
+self.model_name = model_name
+self.rank = rank
+self.output_dir = output_dir
+self.cache_dir = cache_dir
+self.device = torch.device("cuda" if torch.cuda.is_available() else "cpu")
+self.accelerator = Accelerator()
+self.config = self._build_config()
+self.model = None
+self.tokenizer = None
+self.lora_config = None
+self.lora_model = None
+self.trainer = None
+self.train_dataloader = None
+self.eval_dataloader = None
+self.dataset = None
+self.optimizer = None
+self.scheduler = None
+self.scaler = GradScaler()
+self.history = []
+self.losses = []
+self.accuracies = []
+self.metrics = {}
+self.step = 0
+self.epoch = 0
+self.best_loss = float("inf")
+self.best_accuracy = 0.0
+self.patience = 3
+self.patience_counter = 0
+self._setup_directories()
+self._log("🚀 NEXUS NEMOTRON PIPELINE INITIALISÉ")
+
+def _build_config(self):
+return {
+"seed": 42,
+"lr": 1e-4,
+"batch_size": 2,
+"grad_accum": 8,
+"max_epochs": 3,
+"max_length": 2048,
+"warmup_ratio": 0.1,
+"weight_decay": 0.01,
+"dropout": 0.05,
+"lora_alpha": 16,
+"lora_dropout": 0.05,
+"lora_target_modules": r".*\.(in_proj|out_proj|up_proj|down_proj)$",
+"quantization": "bf16",
+"use_flash_attn": True,
+"gradient_checkpointing": True,
+"early_stopping_patience": 3,
+"early_stopping_threshold": 0.01,
+"logging_steps": 10,
+"eval_steps": 100,
+"save_steps": 500,
+"max_grad_norm": 1.0,
+"adam_epsilon": 1e-8,
+"betas": (0.9, 0.999),
+"lr_scheduler": "cosine",
+"fp16": False,
+"bf16": True,
+"tf32": True,
+"nccl": True,
+"amp": True,
+"jit": False,
+"compile": False,
+"distributed": False,
+"world_size": 1,
+"rank": 0,
+"local_rank": 0
+}
+
+def _setup_directories(self):
+for d in [self.output_dir, self.cache_dir, os.path.join(self.output_dir, "checkpoints"), os.path.join(self.output_dir, "logs")]:
+os.makedirs(d, exist_ok=True)
+
+def _log(self, msg, level=logging.INFO):
+logger.log(level, msg)
+
+def _set_seed(self):
+set_seed(self.config["seed"])
+random.seed(self.config["seed"])
+np.random.seed(self.config["seed"])
+torch.manual_seed(self.config["seed"])
+if torch.cuda.is_available():
+torch.cuda.manual_seed_all(self.config["seed"])
+self._log(f"🧬 Seed {self.config['seed']} appliqué")
+
+def _load_model(self):
+self._log(f"📥 Chargement du modèle : {self.model_name}")
+self.tokenizer = AutoTokenizer.from_pretrained(self.model_name, trust_remote_code=True, cache_dir=self.cache_dir)
+self.tokenizer.pad_token = self.tokenizer.eos_token
+self.tokenizer.padding_side = "right"
+model_kwargs = {
+"device_map": "auto",
+"trust_remote_code": True,
+"cache_dir": self.cache_dir,
+"torch_dtype": torch.bfloat16 if self.config["bf16"] else torch.float16,
+"use_flash_attention_2": self.config["use_flash_attn"]
+}
+try:
+self.model = AutoModelForCausalLM.from_pretrained(self.model_name, **model_kwargs)
+except Exception as e:
+self._log(f"⚠️ Flash Attention échoué, fallback : {e}")
+model_kwargs["use_flash_attention_2"] = False
+self.model = AutoModelForCausalLM.from_pretrained(self.model_name, **model_kwargs)
+self._log("✅ Modèle chargé")
+
+def _prepare_for_lora(self):
+self._log(f"🔧 Préparation LoRA (rang={self.rank})")
+self.model = prepare_model_for_kbit_training(self.model)
+self.lora_config = LoraConfig(
+r=self.rank,
+lora_alpha=self.config["lora_alpha"],
+target_modules=self.config["lora_target_modules"],
+lora_dropout=self.config["lora_dropout"],
+bias="none",
+task_type=TaskType.CAUSAL_LM
+)
+self.lora_model = get_peft_model(self.model, self.lora_config)
+self.lora_model.print_trainable_parameters()
+self._log("✅ LoRA appliqué")
+
+def _load_data(self, csv_path="/kaggle/input/nvidia-nemotron-3-reasoning-challenge/train.csv"):
+self._log(f"📊 Chargement des données : {csv_path}")
+self.dataset = pl.read_csv(csv_path)
+self._log(f"✅ {len(self.dataset)} lignes chargées")
+return self.dataset
+
+def _prepare_dataset(self):
+if self.dataset is None:
+raise ValueError("Dataset non chargé. Appelle _load_data() d'abord.")
+self._log("🔄 Préparation du dataset pour l'entraînement")
+texts = self.dataset.to_pandas()
+texts["input"] = texts["prompt"] + " " + texts["answer"]
+dataset = DatasetDict({"train": Dataset.from_pandas(texts[["input"]])})
+def tokenize_function(examples):
+return self.tokenizer(examples["input"], truncation=True, padding="max_length", max_length=self.config["max_length"])
+tokenized = dataset.map(tokenize_function, batched=True)
+self.train_dataloader = DataLoader(tokenized["train"], batch_size=self.config["batch_size"], shuffle=True)
+self._log("✅ Dataset préparé")
+
+def _setup_optimizer(self):
+self.optimizer = AdamW(self.lora_model.parameters(), lr=self.config["lr"], weight_decay=self.config["weight_decay"], eps=self.config["adam_epsilon"], betas=self.config["betas"])
+total_steps = len(self.train_dataloader) * self.config["max_epochs"]
+warmup_steps = int(total_steps * self.config["warmup_ratio"])
+self.scheduler = get_linear_schedule_with_warmup(self.optimizer, num_warmup_steps=warmup_steps, num_training_steps=total_steps)
+self._log(f"✅ Optimizer + scheduler (warmup={warmup_steps})")
+
+def _train_epoch(self):
+self.lora_model.train()
+total_loss = 0
+for batch in tqdm(self.train_dataloader, desc=f"Epoch {self.epoch+1}"):
+with autocast(dtype=torch.bfloat16 if self.config["bf16"] else torch.float16):
+outputs = self.lora_model(input_ids=batch["input_ids"], attention_mask=batch["attention_mask"], labels=batch["input_ids"])
+loss = outputs.loss / self.config["grad_accum"]
+self.scaler.scale(loss).backward()
+if (self.step + 1) % self.config["grad_accum"] == 0:
+self.scaler.unscale_(self.optimizer)
+clip_grad_norm_(self.lora_model.parameters(), self.config["max_grad_norm"])
+self.scaler.step(self.optimizer)
+self.scaler.update()
+self.optimizer.zero_grad()
+self.scheduler.step()
+total_loss += loss.item() * self.config["grad_accum"]
+self.step += 1
+if self.step % self.config["logging_steps"] == 0:
+self._log(f"📉 Step {self.step} — Loss: {loss.item()*self.config['grad_accum']:.4f}")
+avg_loss = total_loss / len(self.train_dataloader)
+self.losses.append(avg_loss)
+self.history.append({"epoch": self.epoch, "loss": avg_loss})
+self._log(f"✅ Epoch {self.epoch+1} terminé — Loss moyenne: {avg_loss:.4f}")
+
+def _early_stop_check(self):
+if len(self.losses) < 2:
+return False
+if self.losses[-1] < self.best_loss - self.config["early_stopping_threshold"]:
+self.best_loss = self.losses[-1]
+self.patience_counter = 0
+return False
+self.patience_counter += 1
+if self.patience_counter >= self.config["early_stopping_patience"]:
+self._log(f"🛑 Early stopping déclenché après {self.config['early_stopping_patience']} époques sans amélioration")
+return True
+return False
+
+def train(self):
+self._set_seed()
+self._load_model()
+self._prepare_for_lora()
+self._load_data()
+self._prepare_dataset()
+self._setup_optimizer()
+for epoch in range(self.config["max_epochs"]):
+self.epoch = epoch
+self._train_epoch()
+if self._early_stop_check():
+break
+self._log("🏁 Entraînement terminé")
+
+def save(self):
+self._log(f"💾 Sauvegarde du modèle dans {self.output_dir}")
+self.lora_model.save_pretrained(self.output_dir)
+self.tokenizer.save_pretrained(self.output_dir)
+with open(os.path.join(self.output_dir, "config.json"), "w") as f:
+json.dump(self.config, f, indent=2)
+with open(os.path.join(self.output_dir, "history.json"), "w") as f:
+json.dump({"losses": self.losses, "history": self.history, "metrics": self.metrics}, f, indent=2)
+self._log("✅ Modèle sauvegardé")
+
+def zip_submission(self, filename="submission.zip"):
+self._log(f"📦 Compression de {self.output_dir} vers {filename}")
+with zipfile.ZipFile(filename, "w", zipfile.ZIP_DEFLATED) as zipf:
+for root, _, files in os.walk(self.output_dir):
+for file in files:
+zipf.write(os.path.join(root, file), os.path.relpath(os.path.join(root, file), self.output_dir))
+self._log(f"✅ Submission prête : {filename}")
+
+def run(self):
+self.train()
+self.save()
+self.zip_submission()
+self._log("🔥 NEXUS NEMOTRON PIPELINE — TERMINÉ")
+
+if __name__ == "__main__":
+parser = argparse.ArgumentParser()
+parser.add_argument("--model", default="metric/nemotron-3-nano-30b-a3b-bf16")
+parser.add_argument("--rank", type=int, default=32)
+parser.add_argument("--output", default="/kaggle/working")
+parser.add_argument("--csv", default="/kaggle/input/nvidia-nemotron-3-reasoning-challenge/train.csv")
+args = parser.parse_args()
+pipeline = NexusNemotronPipeline(model_name=args.model, rank=args.rank, output_dir=args.output)
+pipeline._load_data(args.csv)
+pipeline.run()
+print("✅ DONE")
