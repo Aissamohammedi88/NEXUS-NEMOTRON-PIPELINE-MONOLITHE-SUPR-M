@@ -16,3 +16,77 @@ bin-release/
 # Project files, i.e. `.project`, `.actionScriptProperties` and `.flexProperties`
 # should NOT be excluded as they contain compiler settings and other important
 # information for Eclipse / Flash Builder.
+# ═══════════════════════════════════════════════════════════════════════════
+# NEXUS VORTEX OMEGA - .gitignore
+# ═══════════════════════════════════════════════════════════════════════════
+
+# --- Modèles d'IA & Données Lourdes (NE JAMAIS COMMIT) ---
+*.gguf
+*.bin
+*.safetensors
+*.pt
+*.pth
+*.onnx
+*.h5
+*.pkl
+models/
+data/
+datasets/
+
+# --- Environnements Virtuels (Python) ---
+venv/
+.venv/
+env/
+ENV/
+.python-version
+__pycache__/
+*.py[cod]
+*$py.class
+*.so
+.Python
+build/
+develop-eggs/
+dist/
+downloads/
+eggs/
+.eggs/
+lib/
+lib64/
+parts/
+sdist/
+var/
+wheels/
+*.egg-info/
+.installed.cfg
+*.egg
+
+# --- Logs & Bases de données locales ---
+*.log
+*.sqlite
+*.sqlite3
+*.db
+logs/
+cache/
+
+# --- Secrets & Configurations locales ---
+.env
+.env.local
+.env.*.local
+config.local.json
+secrets.json
+*.pem
+*.key
+
+# --- Systèmes d'exploitation & IDE ---
+.DS_Store
+.DS_Store?
+._*
+.Spotlight-V100
+.Trashes
+ehthumbs.db
+Thumbs.db
+.vscode/
+.idea/
+*.swp
+*.swo
+*~
