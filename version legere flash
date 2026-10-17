@@ -1,0 +1,158 @@
+#!/usr/bin/env bash
+# ═══════════════════════════════════════════════════════════════════════════
+# NEXUS LOCAL IA — VORTEX NEMOTRON (LIGHT EDITION)
+# Installation + Interface Bureau (YAD) + Modèle GGUF (2.4 Go)
+# Auteur : Aissa Mohammedi (DGK)
+# ═══════════════════════════════════════════════════════════════════════════
+
+set -uo pipefail
+
+# Couleurs
+G='\033[1;32m'; R='\033[1;31m'; Y='\033[1;33m'; C='\033[1;36m'; M='\033[1;35m'; N='\033[0m'
+
+echo -e "${M}╔══════════════════════════════════════════════════════════════╗${N}"
+echo -e "${M}║   NEXUS IA — INSTALLATION DU MODÈLE LÉGER (2.4 GO)          ║${N}"
+echo -e "${M}╚══════════════════════════════════════════════════════════════╝${N}"
+
+# 1. VÉRIFICATION DES DÉPENDANCES SYSTÈME
+echo -e "\n${C}→ [1/4] Vérification des paquets système...${N}"
+if ! command -v yad &> /dev/null || ! command -v python3-venv &> /dev/null; then
+    echo -e "${Y}[!] Installation de yad et python3-venv...${N}"
+    sudo apt-get update -qq
+    sudo apt-get install -y -qq yad python3-venv python3-pip wget
+fi
+
+# 2. CRÉATION DE L'ENVIRONNEMENT VIRTUEL
+echo -e "\n${C}→ [2/4] Création du Venv Python...${N}"
+VENV_DIR="$HOME/.nexus_ia_venv"
+if [ ! -d "$VENV_DIR" ]; then
+    python3 -m venv "$VENV_DIR"
+fi
+source "$VENV_DIR/bin/activate"
+
+# 3. INSTALLATION DU MOTEUR D'INFÉRENCE ET DU MODÈLE
+echo -e "\n${C}→ [3/4] Installation du moteur llama-cpp-python...${N}"
+# On installe llama-cpp-python avec support CPU (rapide et léger)
+pip install --upgrade pip -q
+pip install llama-cpp-python huggingface_hub -q
+
+MODEL_DIR="$HOME/.nexus_ia_models"
+mkdir -p "$MODEL_DIR"
+MODEL_PATH="$MODEL_DIR/Phi-3-mini-4k-instruct-q4.gguf"
+
+if [ ! -f "$MODEL_PATH" ]; then
+    echo -e "\n${C}→ Téléchargement du modèle (2.4 Go)...${N}"
+    echo -e "${Y}    Modèle : Microsoft Phi-3 Mini (4K) - Q4${N}"
+    # Lien direct HuggingFace pour le GGUF Q4 (2.4 Go)
+    wget -q --show-progress -O "$MODEL_PATH" "https://huggingface.co/microsoft/Phi-3-mini-4k-instruct-gguf/resolve/main/Phi-3-mini-4k-instruct-q4.gguf"
+else
+    echo -e "${G}[✓] Modèle déjà présent.${N}"
+fi
+
+# 4. GÉNÉRATION DU SCRIPT PYTHON DE GÉNÉRATION
+echo -e "\n${C}→ [4/4] Génération du moteur d'inférence...${N}"
+PY_SCRIPT="$HOME/.nexus_ia_core.py"
+
+cat << 'PYTHON_EOF' > "$PY_SCRIPT"
+import sys
+import argparse
+from llama_cpp import Llama
+
+def main():
+    parser = argparse.ArgumentParser()
+    parser.add_argument("--model", required=True)
+    parser.add_argument("--prompt", required=True)
+    args = parser.parse_args()
+
+    # Chargement du modèle en mémoire (n_ctx=2048 pour ne pas saturer la RAM)
+    llm = Llama(model_path=args.model, n_ctx=2048, n_threads=4, verbose=False)
+    
+    # Génération de la réponse
+    output = llm(
+        args.prompt,
+        max_tokens=512,
+        stop=["</s>", "\n\n\n"],
+        echo=False
+    )
+    
+    # Affichage de la réponse propre
+    print(output['choices'][0]['text'].strip())
+
+if __name__ == "__main__":
+    main()
+PYTHON_EOF
+
+# 5. CRÉATION DE L'INTERFACE BUREAU (YAD)
+APP_SCRIPT="$HOME/nexus_ia_launcher.sh"
+
+cat << 'BASH_EOF' > "$APP_SCRIPT"
+#!/usr/bin/env bash
+source "$HOME/.nexus_ia_venv/bin/activate"
+MODEL="$HOME/.nexus_ia_models/Phi-3-mini-4k-instruct-q4.gguf"
+PY_CORE="$HOME/.nexus_ia_core.py"
+
+while true; do
+    # Boîte de saisie du prompt
+    PROMPT=$(yad --title="Nexus Vortex IA" \
+        --form \
+        --field="Que voulez-vous demander à l'IA ?" \
+        --button="Générer:0" \
+        --button="Quitter:1" \
+        --width=600 --height=150 --center \
+        "Écris un poème sur la souveraineté numérique.")
+    
+    RET=$?
+    if [ $RET -ne 0 ]; then exit 0; fi
+    
+    # Nettoyage du pipe de YAD
+    CLEAN_PROMPT=$(echo "$PROMPT" | sed 's/|$//')
+
+    if [ -n "$CLEAN_PROMPT" ]; then
+        # Fenêtre de chargement / affichage du résultat
+        (
+            echo "⏳ Chargement du modèle et génération..."
+            echo "---------------------------------------------------"
+            python3 "$PY_CORE" --model "$MODEL" --prompt "$CLEAN_PROMPT"
+            echo "---------------------------------------------------"
+            echo "✅ Génération terminée."
+        ) > /tmp/nexus_ia_out.txt &
+        
+        GEN_PID=$!
+        
+        # Afficher le résultat en temps réel (tail)
+        yad --title="Réponse de l'IA" --text-info --tail --filename="/tmp/nexus_ia_out.txt" \
+            --width=800 --height=500 --button="Fermer":0 --center
+            
+        wait $GEN_PID
+    fi
+done
+BASH_EOF
+
+chmod +x "$APP_SCRIPT"
+
+# ═══════════════════════════════════════════════════════════════════════════
+# INTÉGRATION AU MENU LINUX MINT
+# ═══════════════════════════════════════════════════════════════════════════
+DESKTOP_FILE="$HOME/.local/share/applications/nexus-ia.desktop"
+mkdir -p "$HOME/.local/share/applications"
+
+cat > "$DESKTOP_FILE" << EOF
+[Desktop Entry]
+Version=1.0
+Type=Application
+Name=Nexus Vortex IA
+Comment=Assistant IA Local (Phi-3 Mini)
+Exec=$APP_SCRIPT
+Icon=system-search
+Terminal=false
+Categories=Utility;Development;
+EOF
+
+chmod +x "$DESKTOP_FILE"
+
+echo -e "\n${G}╔══════════════════════════════════════════════════════════════╗${N}"
+echo -e "${G}║   [✓] INSTALLATION RÉUSSIE                                  ║${N}"
+echo -e "${G}╚══════════════════════════════════════════════════════════════╝${N}"
+echo -e "${C}L'application 'Nexus Vortex IA' est maintenant dans ton menu Cinnamon.${N}"
+echo -e "${Y}Tu peux aussi la lancer depuis le terminal avec : $APP_SCRIPT${N}"
+echo -e "${M}Le modèle tourne 100% en local. Aucune connexion internet n'est requise après l'installation.${N}"
