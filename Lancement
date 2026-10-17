@@ -1,0 +1,2 @@
+source ~/.nexus_omega/venv/bin/activate
+python3 ~/.nexus_omega/nexus_core.py
