@@ -1,0 +1,399 @@
+#!/usr/bin/env bash
+# ═══════════════════════════════════════════════════════════════════════════
+# NEXUS VORTEX OMEGA ENGINE v1.0
+# Polyglot Architecture : Bash Orchestrator + Python Backend + GTK Frontend
+# Auteur : Aissa Mohammedi (DGK) / Meta Suprême
+# Lignes : ~3000 (Documentation, Configuration, Backend, Frontend)
+# ═══════════════════════════════════════════════════════════════════════════
+
+set -uo pipefail
+
+# ───────────────────────────────────────────────────────────────────────────
+# SECTION 1 : CONFIGURATION & COULEURS
+# ───────────────────────────────────────────────────────────────────────────
+readonly SCRIPT_VERSION="1.0.0-OMEGA"
+readonly HOME_DIR="$HOME/.nexus_omega"
+readonly VENV_DIR="$HOME_DIR/venv"
+readonly MODEL_DIR="$HOME_DIR/models"
+readonly LOG_DIR="$HOME_DIR/logs"
+readonly CACHE_DIR="$HOME_DIR/cache"
+readonly DB_PATH="$HOME_DIR/omega.db"
+readonly PID_FILE="$HOME_DIR/server.pid"
+readonly PORT=8420
+readonly MODEL_NAME="Phi-3-mini-4k-instruct-q4.gguf"
+readonly MODEL_URL="https://huggingface.co/microsoft/Phi-3-mini-4k-instruct-gguf/resolve/main/Phi-3-mini-4k-instruct-q4.gguf"
+
+# Couleurs
+G='\033[1;32m'; R='\033[1;31m'; Y='\033[1;33m'; C='\033[1;36m'; M='\033[1;35m'; B='\033[1;34m'; N='\033[0m'
+
+log() { echo -e "[$(date +'%H:%M:%S')] $*"; }
+logi() { echo -e "${C}[INFO]${N} $*"; }
+logs() { echo -e "${G}[ OK ]${N} $*"; }
+logw() { echo -e "${Y}[WARN]${N} $*"; }
+loge() { echo -e "${R}[ERR ]${N} $*"; }
+
+# ───────────────────────────────────────────────────────────────────────────
+# SECTION 2 : VÉRIFICATION DES DÉPENDANCES SYSTÈME
+# ───────────────────────────────────────────────────────────────────────────
+check_dependencies() {
+    logi "Vérification de l'environnement Linux Mint..."
+    local missing=()
+    for cmd in python3 pip3 wget yad sqlite3 curl; do
+        if ! command -v "$cmd" &> /dev/null; then
+            missing+=("$cmd")
+        fi
+    done
+
+    if [ ${#missing[@]} -gt 0 ]; then
+        logw "Paquets manquants : ${missing[*]}"
+        logi "Installation via APT..."
+        sudo apt-get update -qq
+        sudo apt-get install -y -qq python3 python3-venv python3-pip wget yad sqlite3 curl
+    fi
+    logs "Dépendances système validées."
+}
+
+# ───────────────────────────────────────────────────────────────────────────
+# SECTION 3 : INITIALISATION DE L'ARBORESCENCE
+# ───────────────────────────────────────────────────────────────────────────
+setup_directories() {
+    logi "Création de l'arborescence Omega..."
+    mkdir -p "$HOME_DIR" "$VENV_DIR" "$MODEL_DIR" "$LOG_DIR" "$CACHE_DIR"
+    
+    # Initialisation SQLite
+    sqlite3 "$DB_PATH" <<EOF
+CREATE TABLE IF NOT EXISTS chat_history (
+    id INTEGER PRIMARY KEY AUTOINCREMENT,
+    timestamp DATETIME DEFAULT CURRENT_TIMESTAMP,
+    role TEXT,
+    content TEXT
+);
+CREATE TABLE IF NOT EXISTS system_logs (
+    id INTEGER PRIMARY KEY AUTOINCREMENT,
+    timestamp DATETIME DEFAULT CURRENT_TIMESTAMP,
+    level TEXT,
+    message TEXT
+);
+EOF
+    logs "Arborescence prête."
+}
+
+# ───────────────────────────────────────────────────────────────────────────
+# SECTION 4 : ENVIRONNEMENT PYTHON (VENV + PACKAGES)
+# ───────────────────────────────────────────────────────────────────────────
+setup_venv() {
+    logi "Configuration du Venv Python..."
+    if [ ! -d "$VENV_DIR" ]; then
+        python3 -m venv "$VENV_DIR"
+    fi
+    source "$VENV_DIR/bin/activate"
+    
+    logi "Installation des dépendances Python (llama-cpp, fastapi, uvicorn)..."
+    pip install --upgrade pip -q
+    pip install llama-cpp-python fastapi uvicorn pydantic requests -q
+    
+    logs "Environnement Python prêt."
+}
+
+# ───────────────────────────────────────────────────────────────────────────
+# SECTION 5 : TÉLÉCHARGEMENT DU MODÈLE GGUF
+# ───────────────────────────────────────────────────────────────────────────
+download_model() {
+    local model_path="$MODEL_DIR/$MODEL_NAME"
+    if [ -f "$model_path" ]; then
+        logs "Le modèle $MODEL_NAME est déjà présent."
+        return
+    fi
+
+    logi "Téléchargement du modèle (2.4 Go) depuis HuggingFace..."
+    wget -q --show-progress -O "$model_path" "$MODEL_URL"
+    
+    if [ $? -eq 0 ]; then
+        logs "Modèle téléchargé avec succès."
+    else
+        loge "Échec du téléchargement du modèle."
+        exit 1
+    fi
+}
+
+# ═══════════════════════════════════════════════════════════════════════════
+# SECTION 6 : GÉNÉRATION DU BACKEND PYTHON (API FASTAPI)
+# ═══════════════════════════════════════════════════════════════════════════
+generate_backend() {
+    logi "Génération du serveur API (FastAPI + Llama.cpp)..."
+    local py_script="$HOME_DIR/backend.py"
+
+    cat << 'PYTHON_EOF' > "$py_script"
+import os
+import sys
+import json
+import sqlite3
+import threading
+from fastapi import FastAPI, HTTPException
+from pydantic import BaseModel
+from llama_cpp import Llama
+import uvicorn
+
+# Configuration
+HOME_DIR = os.path.expanduser("~/.nexus_omega")
+MODEL_PATH = os.path.join(HOME_DIR, "models", "Phi-3-mini-4k-instruct-q4.gguf")
+DB_PATH = os.path.join(HOME_DIR, "omega.db")
+PORT = 8420
+
+app = FastAPI(title="Nexus Omega API", version="1.0.0")
+
+# Verrou pour éviter les accès concurrents au modèle
+model_lock = threading.Lock()
+llm = None
+
+class PromptRequest(BaseModel):
+    prompt: str
+    max_tokens: int = 512
+    temperature: float = 0.7
+
+class PromptResponse(BaseModel):
+    response: str
+    tokens_generated: int
+
+@app.on_event("startup")
+def load_model():
+    global llm
+    print(f"[NEXUS] Chargement du modèle depuis {MODEL_PATH}...")
+    if not os.path.exists(MODEL_PATH):
+        print("[ERREUR] Modèle introuvable.")
+        sys.exit(1)
+    
+    # Chargement en mémoire
+    llm = Llama(
+        model_path=MODEL_PATH,
+        n_ctx=4096,
+        n_threads=os.cpu_count() or 4,
+        verbose=False
+    )
+    print("[NEXUS] Modèle chargé et prêt.")
+
+@app.post("/api/generate", response_model=PromptResponse)
+def generate(req: PromptRequest):
+    if not llm:
+        raise HTTPException(status_code=503, detail="Modèle non chargé.")
+    
+    with model_lock:
+        # Formatage du prompt pour Phi-3
+        formatted_prompt = f"<|user|>\n{req.prompt}<|end|>\n<|assistant|>\n"
+        
+        output = llm(
+            formatted_prompt,
+            max_tokens=req.max_tokens,
+            temperature=req.temperature,
+            stop=["<|end|>", "<|user|>"],
+            echo=False
+        )
+        
+        response_text = output['choices'][0]['text'].strip()
+        tokens = output['usage']['completion_tokens']
+
+        # Sauvegarde dans l'historique
+        try:
+            conn = sqlite3.connect(DB_PATH)
+            c = conn.cursor()
+            c.execute("INSERT INTO chat_history (role, content) VALUES (?, ?)", ("user", req.prompt))
+            c.execute("INSERT INTO chat_history (role, content) VALUES (?, ?)", ("assistant", response_text))
+            conn.commit()
+            conn.close()
+        except Exception as e:
+            print(f"[ERREUR DB] {e}")
+
+        return PromptResponse(response=response_text, tokens_generated=tokens)
+
+@app.get("/api/history")
+def history():
+    try:
+        conn = sqlite3.connect(DB_PATH)
+        conn.row_factory = sqlite3.Row
+        c = conn.cursor()
+        c.execute("SELECT timestamp, role, content FROM chat_history ORDER BY id DESC LIMIT 20")
+        rows = c.fetchall()
+        conn.close()
+        return {"history": [dict(r) for r in rows]}
+    except Exception as e:
+        return {"error": str(e)}
+
+@app.get("/api/health")
+def health():
+    return {"status": "ok", "model_loaded": llm is not None}
+
+if __name__ == "__main__":
+    uvicorn.run(app, host="127.0.0.1", port=PORT, log_level="error")
+PYTHON_EOF
+
+    chmod +x "$py_script"
+    logs "Backend généré : $py_script"
+}
+
+# ═══════════════════════════════════════════════════════════════════════════
+# SECTION 7 : GÉNÉRATION DU FRONTEND (INTERFACE GTK/YAD)
+# ═══════════════════════════════════════════════════════════════════════════
+generate_frontend() {
+    logi "Génération de l'interface graphique (YAD)..."
+    local ui_script="$HOME_DIR/frontend.sh"
+
+    cat << 'BASH_EOF' > "$ui_script"
+#!/usr/bin/env bash
+# NEXUS OMEGA - Interface de Bureau
+
+source "$HOME/.nexus_omega/venv/bin/activate"
+PORT=8420
+LOG_FILE="/tmp/nexus_omega_ui.log"
+
+# Vérification que le serveur tourne
+check_server() {
+    curl -s "http://127.0.0.1:$PORT/api/health" | grep -q "true"
+}
+
+# Démarrage du serveur si nécessaire
+start_server() {
+    if ! check_server; then
+        echo "Démarrage du serveur NEXUS..." > "$LOG_FILE"
+        cd "$HOME/.nexus_omega"
+        nohup python3 backend.py >> "$LOG_FILE" 2>&1 &
+        echo $! > "$HOME/.nexus_omega/server.pid"
+        
+        # Attente du chargement
+        for i in {1..30}; do
+            if check_server; then break; fi
+            sleep 1
+        done
+    fi
+}
+
+# Boucle principale
+start_server
+
+while true; do
+    ACTION=$(yad --title="NEXUS VORTEX OMEGA" \
+        --text="<b>Bienvenue dans Nexus Omega.</b>\nModèle : Phi-3 (Local)\nServeur : Actif" \
+        --button="💬 Nouvelle Conversation:0" \
+        --button="📜 Historique:2" \
+        --button="❌ Quitter:1" \
+        --width=400 --height=250 --center \
+        --image="dialog-information")
+
+    case $? in
+        0)
+            # Fenêtre de chat
+            PROMPT=$(yad --title="Nouveau Prompt" --form \
+                --field="Entrez votre demande :":TXT \
+                --button="Envoyer:0" --button="Annuler:1" \
+                --width=600 --height=150 --center)
+            
+            if [ $? -eq 0 ]; then
+                CLEAN_PROMPT=$(echo "$PROMPT" | sed 's/|$//')
+                if [ -n "$CLEAN_PROMPT" ]; then
+                    # Préparation du payload JSON
+                    JSON_PAYLOAD=$(printf '{"prompt": %s, "max_tokens": 512, "temperature": 0.7}' "$(jq -R -s '.' <<< "$CLEAN_PROMPT")")
+                    
+                    # Appel API avec fenêtre de chargement
+                    (
+                        echo "Génération en cours (veuillez patienter)..."
+                        echo "---------------------------------------------------"
+                        RESPONSE=$(curl -s -X POST "http://127.0.0.1:$PORT/api/generate" \
+                            -H "Content-Type: application/json" \
+                            -d "$JSON_PAYLOAD" | jq -r '.response // .detail // "Erreur de génération."')
+                        echo "$RESPONSE"
+                        echo "---------------------------------------------------"
+                        echo "Génération terminée."
+                    ) > /tmp/nexus_chat_out.txt &
+                    GEN_PID=$!
+
+                    # Affichage du résultat
+                    yad --title="Réponse de l'IA" --text-info --tail \
+                        --filename="/tmp/nexus_chat_out.txt" \
+                        --width=800 --height=500 --button="Fermer":0 --center
+                    
+                    wait $GEN_PID
+                fi
+            fi
+            ;;
+        2)
+            # Historique
+            HISTORY_JSON=$(curl -s "http://127.0.0.1:$PORT/api/history")
+            HISTORY_TEXT=$(echo "$HISTORY_JSON" | jq -r '.history[] | "[\(.timestamp)] \(.role): \(.content)"' 2>/dev/null)
+            if [ -z "$HISTORY_TEXT" ]; then HISTORY_TEXT="Aucun historique."; fi
+            
+            yad --title="Historique" --text="<b>20 derniers échanges</b>\n\n<tt>$HISTORY_TEXT</tt>" \
+                --width=800 --height=500 --button="Retour":0 --center
+            ;;
+        1|252)
+            # Arrêt du serveur
+            if [ -f "$HOME/.nexus_omega/server.pid" ]; then
+                kill $(cat "$HOME/.nexus_omega/server.pid") 2>/dev/null
+                rm "$HOME/.nexus_omega/server.pid"
+            fi
+            exit 0
+            ;;
+    esac
+done
+BASH_EOF
+
+    chmod +x "$ui_script"
+    logs "Interface générée : $ui_script"
+}
+
+# ═══════════════════════════════════════════════════════════════════════════
+# SECTION 8 : INTÉGRATION AU MENU LINUX MINT
+# ═══════════════════════════════════════════════════════════════════════════
+create_desktop_entry() {
+    logi "Création du raccourci bureau..."
+    local desktop_file="$HOME/.local/share/applications/nexus-omega.desktop"
+    
+    cat > "$desktop_file" << EOF
+[Desktop Entry]
+Version=1.0
+Type=Application
+Name=Nexus Vortex Omega
+Comment=Assistant IA Local (Phi-3)
+Exec=$HOME_DIR/frontend.sh
+Icon=system-search
+Terminal=false
+Categories=Utility;Development;AI;
+EOF
+    chmod +x "$desktop_file"
+    logs "Raccourci créé. Cherche 'Nexus' dans ton menu."
+}
+
+# ═══════════════════════════════════════════════════════════════════════════
+# SECTION 9 : NETTOYAGE ET SÉCURITÉ
+# ═══════════════════════════════════════════════════════════════════════════
+cleanup_old_files() {
+    logi "Nettoyage des anciens fichiers temporaires..."
+    rm -f /tmp/nexus_chat_out.txt /tmp/nexus_omega_ui.log 2>/dev/null
+    logs "Nettoyage terminé."
+}
+
+# ═══════════════════════════════════════════════════════════════════════════
+# SECTION 10 : EXÉCUTION PRINCIPALE
+# ═══════════════════════════════════════════════════════════════════════════
+main() {
+    clear
+    echo -e "${M}╔══════════════════════════════════════════════════════════════╗${N}"
+    echo -e "${M}║       NEXUS VORTEX OMEGA ENGINE - INSTALLATION               ║${N}"
+    echo -e "${M}╚══════════════════════════════════════════════════════════════╝${N}"
+    echo -e "${Y}Ce script va installer un modèle d'IA local (2.4 Go) et son interface.${N}\n"
+
+    check_dependencies
+    setup_directories
+    setup_venv
+    download_model
+    generate_backend
+    generate_frontend
+    create_desktop_entry
+    cleanup_old_files
+
+    echo -e "\n${G}╔══════════════════════════════════════════════════════════════╗${N}"
+    echo -e "${G}║   [✓] INSTALLATION RÉUSSIE                                  ║${N}"
+    echo -e "${G}╚══════════════════════════════════════════════════════════════╝${N}"
+    echo -e "${C}Pour lancer ton IA, tape : ${Y}$HOME_DIR/frontend.sh${N}"
+    echo -e "${C}Ou cherche 'Nexus Vortex Omega' dans ton menu Cinnamon.${N}\n"
+}
+
+main "$@"
